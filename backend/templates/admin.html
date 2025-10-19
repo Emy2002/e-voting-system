@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Administrator Dashboard</h2>
+
+<p>Administrative options:</p>
+
+<ul>
+    <li><a href="{{ url_for('results') }}">View Results</a></li>
+    <!-- Add further admin links here -->
+</ul>
+{% endblock %}

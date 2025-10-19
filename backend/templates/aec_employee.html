@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>AEC Employee Dashboard</h2>
+<ul>
+    <li><a href="{{ url_for('register_voters') }}">Register Voters</a></li>
+    <li><a href="{{ url_for('view_voter_list') }}">View Voter List</a></li>
+    <li><a href="{{ url_for('view_own_status') }}">View Own Status</a></li>
+</ul>
+{% endblock %}

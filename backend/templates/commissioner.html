@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Commissioner Dashboard</h2>
+<p>Welcome, Commissioner! Here you can manage candidates, elections, and view results.</p>
+<ul>
+    <li><a href="{{ url_for('results') }}">View Results</a></li>
+    <!-- Add further commissioner links here -->
+</ul>
+{% endblock %}
