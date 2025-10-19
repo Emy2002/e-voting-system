@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Election Results</h2>
+
+{% if results %}
+<table>
+    <thead>
+        <tr><th>Candidate</th><th>Vote Count</th></tr>
+    </thead>
+    <tbody>
+        {% for candidate, count in results.items() %}
+        <tr>
+            <td>{{ candidate }}</td>
+            <td>{{ count }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No votes recorded yet.</p>
+{% endif %}
+{% endblock %}

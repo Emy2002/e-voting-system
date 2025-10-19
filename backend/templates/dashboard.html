@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Welcome, Voter!</h2>
+
+<p>You can cast your vote below.</p>
+
+<form id="voteForm" method="post" action="{{ url_for('vote') }}">
+    <label for="candidate_id">Candidate ID:</label><br />
+    <input type="text" id="candidate_id" name="candidate_id" pattern="CAND_[A-Z0-9]{6}" required /><br /><br />
+
+    <input type="hidden" name="voter_id" value="{{ session.get('user_id') }}" />
+
+    <button type="submit">Cast Vote</button>
+</form>
+
+<script>
+document.getElementById('voteForm').onsubmit = async function (e) {
+    e.preventDefault();
+    const candidate_id = e.target.candidate_id.value;
+    const voter_id = e.target.voter_id.value;
+    const vote_data = {
+        candidate_id: candidate_id,
+        voter_id: voter_id,
+        timestamp: new Date().toISOString()
+    };
+    const response = await fetch("{{ url_for('vote') }}", {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(vote_data)
+    });
+    const result = await response.json();
+    alert(result.message || result.error);
+};
+</script>
+
+{% endblock %}
