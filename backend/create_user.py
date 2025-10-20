@@ -6,9 +6,9 @@ from backend.encryption.password_hashing import PasswordHashingService
 with app.app_context():
     mfa = MFAService()
     pwhash = PasswordHashingService()
-    email = "aecemployee@example.com"
+    email = "commissioner4@example.com"
     password = "TestUser1234!"
-    role = "aec_employee" # Use "administrator" for admin
+    role = "commissioner" # Use "administrator" for admin
     mfa_secret = mfa.generate_secret_key(email)
     print(f"User email: {email}")
     print(f"Plaintext password: {password}")

@@ -3,9 +3,11 @@
 <h2>Administrator Dashboard</h2>
 
 <p>Administrative options:</p>
-
 <ul>
-    <li><a href="{{ url_for('results') }}">View Results</a></li>
-    <!-- Add further admin links here -->
+    <li><a href="{{ url_for('manage_users') }}">Manage Users</a></li>
+    <li><a href="{{ url_for('view_audit_logs') }}">View Audit Logs</a></li>
+    <li><a href="{{ url_for('configure_system') }}">Configure System</a></li>
+    <li><a href="{{ url_for('register_voters') }}">Register Voters</a></li>
+    <li><a href="{{ url_for('view_voter_list') }}">View Voter List</a></li>
 </ul>
 {% endblock %}

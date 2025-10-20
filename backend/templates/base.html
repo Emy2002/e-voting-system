@@ -9,12 +9,10 @@
 <body>
     <header>
         <h1>Electronic Voting Platform</h1>
-        {% if session.get('user_id') %}
-        <nav>
+        <nav id="main-nav" style="display:none;">
             <a href="{{ url_for('dashboard') }}">Dashboard</a>
             <a href="{{ url_for('logout') }}">Logout</a>
         </nav>
-        {% endif %}
     </header>
 
     <main>
@@ -34,5 +32,83 @@
     <footer>
         <p>© 2025 Electronic Voting Project</p>
     </footer>
+    <script>
+    let lastActivity = Date.now();
+    const logoutTimeout = 2 * 60 * 1000; // 2 minutes
+    let logoutTimer = null;
+
+    function resetLogoutTimer() {
+        if (logoutTimer) clearTimeout(logoutTimer);
+        logoutTimer = setTimeout(handleLogout, logoutTimeout);
+    }
+
+    function handleLogout() {
+        removeActivityListeners();
+        document.getElementById('main-nav').style.display = 'none';
+        window.location.href = '/';
+    }
+
+    function activityListener() {
+        lastActivity = Date.now();
+        resetLogoutTimer();
+        // Only refresh token if user is active
+        fetch('/refresh', {
+            method: 'POST',
+            credentials: 'include'
+        }).then(response => {
+            if (!response.ok) {
+                handleLogout();
+            }
+        }).catch(() => {
+            handleLogout();
+        });
+    }
+
+    function addActivityListeners() {
+        document.addEventListener('mousemove', activityListener);
+        document.addEventListener('keydown', activityListener);
+        document.addEventListener('mousedown', activityListener);
+        document.addEventListener('touchstart', activityListener);
+    }
+    function removeActivityListeners() {
+        document.removeEventListener('mousemove', activityListener);
+        document.removeEventListener('keydown', activityListener);
+        document.removeEventListener('mousedown', activityListener);
+        document.removeEventListener('touchstart', activityListener);
+        if (logoutTimer) clearTimeout(logoutTimer);
+    }
+
+    function checkAuth() {
+        fetch('/dashboard', {
+            method: 'GET',
+            credentials: 'include'
+        })
+        .then(response => {
+            if (response.ok) {
+                document.getElementById('main-nav').style.display = '';
+                addActivityListeners();
+                resetLogoutTimer();
+            } else if (response.status === 401) {
+                // Token expired or unauthorized, force logout
+                handleLogout();
+            } else {
+                document.getElementById('main-nav').style.display = 'none';
+                if (window.location.pathname !== '/') {
+                    window.location.href = '/';
+                }
+            }
+        })
+        .catch(() => {
+            document.getElementById('main-nav').style.display = 'none';
+            if (window.location.pathname !== '/') {
+                window.location.href = '/';
+            }
+        });
+    }
+    // Only run auth check if not on login page
+    if (window.location.pathname !== '/' && window.location.pathname !== '/login') {
+        checkAuth();
+    }
+    </script>
 </body>
 </html>
