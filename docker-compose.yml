@@ -11,9 +11,18 @@ services:
     depends_on:
       - db
       - redis
+      - opa
     volumes:
       - .:/app
       - ./logs:/app/logs
+
+  opa:
+    image: openpolicyagent/opa:0.60.0
+    command: run --server --set=decision_logs.console=true /opa-policies/rbac.rego
+    ports:
+      - "8181:8181"
+    volumes:
+      - ./opa-policies/rbac.rego:/opa-policies/rbac.rego
 
   redis:
     image: redis:7-alpine

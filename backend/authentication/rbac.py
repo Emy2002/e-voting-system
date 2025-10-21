@@ -3,8 +3,12 @@
 from enum import Enum
 from functools import wraps
 from flask import session, abort
+import requests
+import logging
 
 # SR-02: Role-Based Access Control (RBAC)
+
+OPA_URL = "http://opa:8181/v1/data/rbac/allow"  # Use Docker Compose service name for inter-container communication
 
 class UserRole(Enum):
     VOTER = "voter"
@@ -65,16 +69,39 @@ class RBACService:
             user_role = UserRole(user_role)
         return ROLE_PERMISSIONS.get(user_role, [])
 
-# Decorator for required permission
+def opa_check_permission(user_role, permission):
+    # Always convert to string and lowercase
+    role_str = str(user_role).lower().strip()
+    perm_str = str(permission).lower().strip()
+    data = {
+        "input": {
+            "role": role_str,
+            "permission": perm_str
+        }
+    }
+    logging.warning(f"OPA check payload: {data}")
+    try:
+        response = requests.post(OPA_URL, json=data)
+        logging.warning(f"OPA response status: {response.status_code}")
+        logging.warning(f"OPA response body: {response.text}")
+        if response.status_code == 200:
+            result = response.json()
+            return result.get("result", False)
+    except Exception as e:
+        logging.warning(f"OPA request error: {e}")
+    return False
+
+# Decorator for required permission (now uses OPA)
 def require_permission(permission):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
             if 'user_role' not in session:
                 abort(401)
-            rbac_service = RBACService()
             role = session['user_role']
-            if not rbac_service.has_permission(role, permission):
+            # Always use .value for Enum permissions
+            perm_str = permission.value if isinstance(permission, Enum) else str(permission)
+            if not opa_check_permission(role, perm_str):
                 abort(403)
             return func(*args, **kwargs)
         return wrapper

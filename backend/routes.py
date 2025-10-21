@@ -3,10 +3,10 @@
 # Routes and views for Flask app combining all roles into a unified interface
 # Calls underlying security services from authentication, voting, audit, etc.
 
-from flask import render_template, request, jsonify, session, redirect, url_for
+from flask import render_template, request, jsonify, session, redirect, url_for, abort
 from backend import app, limiter, db
 from backend.authentication.mfa import MFAService
-from backend.authentication.rbac import RBACService, require_permission, Permission
+from backend.authentication.rbac import RBACService, require_permission, Permission, opa_check_permission
 from backend.database.models import User
 from backend.encryption.data_encryption import DataEncryptionService
 from backend.encryption.digital_signatures import DigitalSignatureService
@@ -57,7 +57,7 @@ def login():
             return render_template('login.html', error='Invalid MFA code.')
 
         session['user_id'] = user.id
-        session['user_role'] = user.role
+        session['user_role'] = user.role.lower()
         session['login_time'] = datetime.utcnow().isoformat()
         audit_logger.log_security_event('successful_login', {'user_id': user.id, 'role': user.role})
 
@@ -125,9 +125,10 @@ def vote():
 
 @app.route('/results', methods=['GET', 'POST'])
 @jwt_required()
-@require_permission(Permission.VIEW_RESULTS)
 def results():
     role = session.get('user_role')
+    if not opa_check_permission(role, Permission.VIEW_RESULTS.value):
+        abort(403)
     if str(role).lower() == 'commissioner':
         if request.method == 'POST':
             admin1_email = request.form.get('admin1_email')
@@ -198,24 +199,36 @@ def logout():
 @jwt_required()
 @require_permission(Permission.REGISTER_VOTERS)
 def register_voters():
+    role = session.get('user_role')
+    if not opa_check_permission(role, Permission.REGISTER_VOTERS.value):
+        abort(403)
     return render_template('register_voters.html')
 
 @app.route('/view_voter_list')
 @jwt_required()
 @require_permission(Permission.VIEW_VOTER_LIST)
 def view_voter_list():
+    role = session.get('user_role')
+    if not opa_check_permission(role, Permission.VIEW_VOTER_LIST.value):
+        abort(403)
     return render_template('view_voter_list.html')
 
 @app.route('/view_own_status')
 @jwt_required()
 @require_permission(Permission.VIEW_OWN_STATUS)
 def view_own_status():
+    role = session.get('user_role')
+    if not opa_check_permission(role, Permission.VIEW_OWN_STATUS.value):
+        abort(403)
     return render_template('view_own_status.html')
 
 @app.route('/manage_users')
 @jwt_required()
 @require_permission(Permission.MANAGE_USERS)
 def manage_users():
+    role = session.get('user_role')
+    if not opa_check_permission(role, Permission.MANAGE_USERS.value):
+        abort(403)
     # Placeholder: In production, fetch and display users from the database
     return render_template('manage_users.html')
 
@@ -223,6 +236,9 @@ def manage_users():
 @jwt_required()
 @require_permission(Permission.VIEW_AUDIT_LOGS)
 def view_audit_logs():
+    role = session.get('user_role')
+    if not opa_check_permission(role, Permission.VIEW_AUDIT_LOGS.value):
+        abort(403)
     # Placeholder: In production, load and display audit logs from file or DB
     return render_template('view_audit_logs.html')
 
@@ -230,14 +246,19 @@ def view_audit_logs():
 @jwt_required()
 @require_permission(Permission.CONFIGURE_SYSTEM)
 def configure_system():
+    role = session.get('user_role')
+    if not opa_check_permission(role, Permission.CONFIGURE_SYSTEM.value):
+        abort(403)
     # Placeholder: In production, provide system configuration options
     return render_template('configure_system.html')
 
 @app.route('/manage_candidates', methods=['GET', 'POST'])
 @jwt_required()
-@require_permission(Permission.MANAGE_CANDIDATES)
 def manage_candidates():
     role = session.get('user_role')
+    # OPA permission check for commissioner
+    if not opa_check_permission(role, Permission.MANAGE_CANDIDATES.value):
+        abort(403)
     if str(role).lower() == 'commissioner':
         if request.method == 'POST':
             admin1_email = request.form.get('admin1_email')
@@ -253,18 +274,16 @@ def manage_candidates():
                 error = "Page can be viewed only with registered admin approvals"
             if error:
                 return render_template('manage_candidates.html', error=error, require_admin_approval=True)
-            # If both admins are valid, show the page
             return render_template('manage_candidates.html', error=None, require_admin_approval=False)
-        # GET: show approval form
         return render_template('manage_candidates.html', require_admin_approval=True)
-    # If not commissioner, show page as normal
     return render_template('manage_candidates.html', require_admin_approval=False)
 
 @app.route('/manage_elections', methods=['GET', 'POST'])
 @jwt_required()
-@require_permission(Permission.MANAGE_ELECTIONS)
 def manage_elections():
     role = session.get('user_role')
+    if not opa_check_permission(role, Permission.MANAGE_ELECTIONS.value):
+        abort(403)
     if str(role).lower() == 'commissioner':
         if request.method == 'POST':
             admin1_email = request.form.get('admin1_email')
@@ -288,6 +307,9 @@ def manage_elections():
 @jwt_required()
 @require_permission(Permission.UPDATE_ADDRESS)
 def update_address():
+    role = session.get('user_role')
+    if not opa_check_permission(role, Permission.UPDATE_ADDRESS.value):
+        abort(403)
     # Placeholder: In production, allow voters to update their address
     return render_template('update_address.html')
 

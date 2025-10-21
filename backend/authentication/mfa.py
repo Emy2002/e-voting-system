@@ -17,6 +17,10 @@ class MFAService:
         secret = pyotp.random_base32()
         return secret
 
+    def generate_totp_secret(self):
+        """Generate a base32 secret key for TOTP (alias for generate_secret_key)"""
+        return self.generate_secret_key('user')
+
     def generate_qr_code(self, secret, user_email):
         """Generate base64 encoded QR code image for authenticator app"""
         totp = pyotp.TOTP(secret)
@@ -34,10 +38,15 @@ class MFAService:
 
         return img_base64
 
-    def verify_totp(self, secret, token):
-        """Verify TOTP token; allow 30 seconds window"""
+    def get_totp_uri(self, username, secret):
+        """Return the otpauth URI for TOTP setup"""
         totp = pyotp.TOTP(secret)
-        return totp.verify(token, valid_window=1)
+        return totp.provisioning_uri(name=username, issuer_name=self.issuer_name)
+
+    def verify_totp(self, secret, token, window=0):
+        """Verify TOTP token; allow custom window (default 0 for strict)"""
+        totp = pyotp.TOTP(secret)
+        return totp.verify(token, valid_window=window)
 
     def generate_backup_codes(self, count=10):
         """Generate backup recovery codes"""
@@ -46,6 +55,21 @@ class MFAService:
             code = '-'.join([secrets.token_hex(4) for _ in range(2)])
             codes.append(code)
         return codes
+
+
+# Add module-level functions for test compatibility
+
+def generate_totp_secret():
+    """Module-level function for test compatibility"""
+    return MFAService().generate_totp_secret()
+
+def get_totp_uri(username, secret):
+    """Module-level function for test compatibility"""
+    return MFAService().get_totp_uri(username, secret)
+
+def verify_totp(secret, token, window=0):
+    """Module-level function for test compatibility"""
+    return MFAService().verify_totp(secret, token, window=window)
 
 
 # Usage example (for internal tests)
