@@ -1,22 +1,39 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Election Results</h2>
-
-{% if results %}
-<table>
-    <thead>
-        <tr><th>Candidate</th><th>Vote Count</th></tr>
-    </thead>
-    <tbody>
-        {% for candidate, count in results.items() %}
-        <tr>
-            <td>{{ candidate }}</td>
-            <td>{{ count }}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+{% if require_admin_approval %}
+  <form method="post">
+    <p>This action requires approval from two administrators.</p>
+    <label for="admin1_email">Administrator 1 Email:</label><br />
+    <input type="email" name="admin1_email" required><br /><br />
+    <label for="admin1_mfa">Administrator 1 MFA Code:</label><br />
+    <input type="text" name="admin1_mfa" required pattern="[0-9]{6}" maxlength="6"><br /><br />
+    <label for="admin2_email">Administrator 2 Email:</label><br />
+    <input type="email" name="admin2_email" required><br /><br />
+    <label for="admin2_mfa">Administrator 2 MFA Code:</label><br />
+    <input type="text" name="admin2_mfa" required pattern="[0-9]{6}" maxlength="6"><br /><br />
+    <button type="submit">Approve & Continue</button>
+  </form>
+  {% if error %}
+    <p style="color:red;">{{ error }}</p>
+  {% endif %}
 {% else %}
-<p>No votes recorded yet.</p>
+  {% if results %}
+  <table>
+      <thead>
+          <tr><th>Candidate</th><th>Vote Count</th></tr>
+      </thead>
+      <tbody>
+          {% for candidate, count in results.items() %}
+          <tr>
+              <td>{{ candidate }}</td>
+              <td>{{ count }}</td>
+          </tr>
+          {% endfor %}
+      </tbody>
+  </table>
+  {% else %}
+  <p>No votes recorded yet.</p>
+  {% endif %}
 {% endif %}
 {% endblock %}

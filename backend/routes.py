@@ -123,13 +123,45 @@ def vote():
         audit_logger.log_security_event('vote_error', {'user_id': user_id, 'error': str(e)})
         return jsonify({'error': 'Failed to cast vote'}), 500
 
-@app.route('/results')
+@app.route('/results', methods=['GET', 'POST'])
 @jwt_required()
 @require_permission(Permission.VIEW_RESULTS)
 def results():
+    role = session.get('user_role')
+    if str(role).lower() == 'commissioner':
+        if request.method == 'POST':
+            admin1_email = request.form.get('admin1_email')
+            admin1_mfa = request.form.get('admin1_mfa')
+            admin2_email = request.form.get('admin2_email')
+            admin2_mfa = request.form.get('admin2_mfa')
+            admin1 = get_user_by_email(admin1_email)
+            admin2 = get_user_by_email(admin2_email)
+            error = None
+            if not admin1 or not admin2 or admin1.role.lower() != 'administrator' or admin2.role.lower() != 'administrator':
+                error = "Page can be viewed only with registered admin approvals"
+            elif not mfa_service.verify_totp(admin1.mfa_secret, admin1_mfa) or not mfa_service.verify_totp(admin2.mfa_secret, admin2_mfa):
+                error = "Page can be viewed only with registered admin approvals"
+            if error:
+                return render_template('results.html', error=error, require_admin_approval=True)
+            # Show results for commissioner with admin approval
+            user_id = get_jwt_identity()
+            try:
+                votes_encrypted = get_all_votes()
+                valid_votes = []
+                for vote_encrypted in votes_encrypted:
+                    decrypted = encryption_service.decrypt_vote(vote_encrypted.data)
+                    if signature_service.verify_vote_signature(decrypted):
+                        valid_votes.append(decrypted['vote_data'])
+                results = calculate_results(valid_votes)
+                audit_logger.log_security_event('results_accessed', {'user_id': user_id, 'votes_count': len(valid_votes)})
+                return render_template('results.html', results=results, require_admin_approval=False)
+            except Exception as e:
+                audit_logger.log_security_event('results_error', {'user_id': user_id, 'error': str(e)})
+                return 'Error loading results', 500
+        return render_template('results.html', require_admin_approval=True)
+    # Show results for other roles
     user_id = get_jwt_identity()
     try:
-        # Placeholder get_all_votes() from DB
         votes_encrypted = get_all_votes()
         valid_votes = []
         for vote_encrypted in votes_encrypted:
@@ -137,10 +169,8 @@ def results():
             if signature_service.verify_vote_signature(decrypted):
                 valid_votes.append(decrypted['vote_data'])
         results = calculate_results(valid_votes)
-
         audit_logger.log_security_event('results_accessed', {'user_id': user_id, 'votes_count': len(valid_votes)})
-
-        return render_template('results.html', results=results)
+        return render_template('results.html', results=results, require_admin_approval=False)
     except Exception as e:
         audit_logger.log_security_event('results_error', {'user_id': user_id, 'error': str(e)})
         return 'Error loading results', 500
@@ -203,19 +233,56 @@ def configure_system():
     # Placeholder: In production, provide system configuration options
     return render_template('configure_system.html')
 
-@app.route('/manage_candidates')
+@app.route('/manage_candidates', methods=['GET', 'POST'])
 @jwt_required()
 @require_permission(Permission.MANAGE_CANDIDATES)
 def manage_candidates():
-    # Placeholder: In production, manage candidate records
-    return render_template('manage_candidates.html')
+    role = session.get('user_role')
+    if str(role).lower() == 'commissioner':
+        if request.method == 'POST':
+            admin1_email = request.form.get('admin1_email')
+            admin1_mfa = request.form.get('admin1_mfa')
+            admin2_email = request.form.get('admin2_email')
+            admin2_mfa = request.form.get('admin2_mfa')
+            admin1 = get_user_by_email(admin1_email)
+            admin2 = get_user_by_email(admin2_email)
+            error = None
+            if not admin1 or not admin2 or admin1.role.lower() != 'administrator' or admin2.role.lower() != 'administrator':
+                error = "Page can be viewed only with registered admin approvals"
+            elif not mfa_service.verify_totp(admin1.mfa_secret, admin1_mfa) or not mfa_service.verify_totp(admin2.mfa_secret, admin2_mfa):
+                error = "Page can be viewed only with registered admin approvals"
+            if error:
+                return render_template('manage_candidates.html', error=error, require_admin_approval=True)
+            # If both admins are valid, show the page
+            return render_template('manage_candidates.html', error=None, require_admin_approval=False)
+        # GET: show approval form
+        return render_template('manage_candidates.html', require_admin_approval=True)
+    # If not commissioner, show page as normal
+    return render_template('manage_candidates.html', require_admin_approval=False)
 
-@app.route('/manage_elections')
+@app.route('/manage_elections', methods=['GET', 'POST'])
 @jwt_required()
 @require_permission(Permission.MANAGE_ELECTIONS)
 def manage_elections():
-    # Placeholder: In production, manage election events
-    return render_template('manage_elections.html')
+    role = session.get('user_role')
+    if str(role).lower() == 'commissioner':
+        if request.method == 'POST':
+            admin1_email = request.form.get('admin1_email')
+            admin1_mfa = request.form.get('admin1_mfa')
+            admin2_email = request.form.get('admin2_email')
+            admin2_mfa = request.form.get('admin2_mfa')
+            admin1 = get_user_by_email(admin1_email)
+            admin2 = get_user_by_email(admin2_email)
+            error = None
+            if not admin1 or not admin2 or admin1.role.lower() != 'administrator' or admin2.role.lower() != 'administrator':
+                error = "Page can be viewed only with registered admin approvals"
+            elif not mfa_service.verify_totp(admin1.mfa_secret, admin1_mfa) or not mfa_service.verify_totp(admin2.mfa_secret, admin2_mfa):
+                error = "Page can be viewed only with registered admin approvals"
+            if error:
+                return render_template('manage_elections.html', error=error, require_admin_approval=True)
+            return render_template('manage_elections.html', error=None, require_admin_approval=False)
+        return render_template('manage_elections.html', require_admin_approval=True)
+    return render_template('manage_elections.html', require_admin_approval=False)
 
 @app.route('/update_address')
 @jwt_required()
