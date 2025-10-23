@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Election Results</h2>
+<h2>Manage Elections</h2>
 {% if require_admin_approval %}
   <form method="post">
     <p>This action requires approval from two administrators.</p>
@@ -18,22 +18,6 @@
     <p style="color:red;">{{ error }}</p>
   {% endif %}
 {% else %}
-  {% if results %}
-  <table>
-      <thead>
-          <tr><th>Candidate</th><th>Vote Count</th></tr>
-      </thead>
-      <tbody>
-          {% for candidate, count in results.items() %}
-          <tr>
-              <td>{{ candidate }}</td>
-              <td>{{ count }}</td>
-          </tr>
-          {% endfor %}
-      </tbody>
-  </table>
-  {% else %}
-  <p>No votes recorded yet.</p>
-  {% endif %}
+  <p>This is a placeholder for election management. Commissioners will be able to create and manage elections here.</p>
 {% endif %}
 {% endblock %}

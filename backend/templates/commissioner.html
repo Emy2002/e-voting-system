@@ -3,7 +3,9 @@
 <h2>Commissioner Dashboard</h2>
 <p>Welcome, Commissioner! Here you can manage candidates, elections, and view results.</p>
 <ul>
+    <li><a href="{{ url_for('manage_candidates') }}">Manage Candidates</a></li>
+    <li><a href="{{ url_for('manage_elections') }}">Manage Elections</a></li>
     <li><a href="{{ url_for('results') }}">View Results</a></li>
-    <!-- Add further commissioner links here -->
+    <li><a href="{{ url_for('view_audit_logs') }}">View Audit Logs</a></li>
 </ul>
 {% endblock %}
