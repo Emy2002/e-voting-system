@@ -16,4 +16,5 @@ ENV PYTHONPATH=/app
 
 EXPOSE 5000
 
-CMD ["flask", "run", "--host=0.0.0.0", "--port=5000", "--cert=adhoc"]
+# Run Flask in HTTP mode; Nginx handles HTTPS externally
+CMD ["flask", "run", "--host=0.0.0.0", "--port=5000"]
