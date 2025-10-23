@@ -1,5 +1,39 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Audit Logs</h2>
-<p>This is a placeholder for the audit log viewer. Here, administrators will be able to review security and system events.</p>
+<div class="audit-log-container">
+{% if error %}
+	<div class="error">{{ error }}</div>
+{% else %}
+	<p>
+		<a class="button" href="{{ url_for('download_audit_log') }}">Download raw audit.log</a>
+	</p>
+	{% if entries %}
+		<table>
+			<thead>
+				<tr><th>Timestamp</th><th>Event Type</th><th>User</th><th>Data</th></tr>
+			</thead>
+			<tbody>
+			{% for e in entries %}
+				<tr>
+					<td>{{ e.timestamp if e.timestamp is defined else '-' }}</td>
+					<td>{{ e.event_type if e.event_type is defined else (e.raw[:30] if e.raw is defined else '-') }}</td>
+					<td>{{ e.user_id if e.user_id is defined else '-' }}</td>
+					<td>
+						{% if e.data is defined %}
+							<pre>{{ e.data | tojson(indent=2) }}</pre>
+						{% elif e.raw is defined %}
+							<pre>{{ e.raw }}</pre>
+						{% else %}
+							-
+						{% endif %}
+					</td>
+				</tr>
+			{% endfor %}
+			</tbody>
+		</table>
+	{% else %}
+		<p>No audit entries found.</p>
+	{% endif %}
+{% endif %}
 {% endblock %}

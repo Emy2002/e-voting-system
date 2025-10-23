@@ -1,10 +1,48 @@
 # backend/encryption/data_encryption.py
+"""Vote encryption and decryption service using AES-256-GCM with key envelope.
+
+This module implements secure vote encryption using a two-layer approach:
+1. Vote data is encrypted using AES-256-GCM with a random key
+2. The random key is encrypted using Fernet (key envelope) with a master key
+
+Key features:
+- AES-256-GCM provides confidentiality and integrity protection
+- Key envelope pattern allows master key rotation without re-encrypting votes
+- Voter ID hashing for voter anonymity while preventing duplicate votes
+- PBKDF2 key derivation for password-based operations
+
+Exception hierarchy:
+- DecryptionError: Base class for all decryption failures
+  - InvalidPackageError: Malformed input (base64/JSON decode failures)
+  - KeyDecryptionError: Master key cannot decrypt the vote key (wrong key)
+  - IntegrityError: Ciphertext/tag verification failed (tampering detected)
+
+Usage:
+    svc = DataEncryptionService(master_key='32-byte-master-key')
+    
+    # Encrypt a vote
+    encrypted = svc.encrypt_vote(
+        {'candidate': 'Alice'},
+        voter_id='voter123'
+    )
+    
+    # Decrypt a vote (may raise DecryptionError subclasses)
+    try:
+        vote = svc.decrypt_vote(encrypted)
+    except InvalidPackageError:
+        # Handle malformed input
+    except KeyDecryptionError:
+        # Handle wrong master key
+    except IntegrityError:
+        # Handle tampering detected
+"""
 
 import os
 import base64
 import json
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
@@ -61,11 +99,28 @@ class DataEncryptionService:
 
     def decrypt_vote(self, encrypted_vote: str) -> dict:
         """Decrypt vote data"""
+        # Step 1: decode package from base64 and JSON
         try:
             package = json.loads(base64.b64decode(encrypted_vote).decode())
+        except Exception as e:
+            raise InvalidPackageError(f"Invalid encrypted package: {e}")
+
+        # Step 2: verify package structure and decrypt envelope key
+        required_fields = ['encrypted_key', 'encrypted_vote', 'iv', 'tag']
+        missing_fields = [f for f in required_fields if f not in package]
+        if missing_fields:
+            raise InvalidPackageError(f"Missing required fields: {', '.join(missing_fields)}")
+
+        try:
             f = Fernet(base64.urlsafe_b64encode(self.master_key))
             vote_key = f.decrypt(base64.b64decode(package['encrypted_key']))
+        except InvalidToken as e:
+            raise KeyDecryptionError(f"Failed to decrypt envelope key: {e}")
+        except Exception as e:
+            raise KeyDecryptionError(f"Unexpected key decryption error: {e}")
 
+        # Step 3: decrypt AES-GCM ciphertext (verify tag)
+        try:
             cipher = Cipher(
                 algorithms.AES(vote_key),
                 modes.GCM(
@@ -76,10 +131,34 @@ class DataEncryptionService:
             decryptor = cipher.decryptor()
             decrypted = decryptor.update(base64.b64decode(package['encrypted_vote'])) + decryptor.finalize()
             return json.loads(decrypted.decode())
+        except InvalidTag as e:
+            # GCM tag verification failed
+            raise IntegrityError(f"GCM authentication failed: {e}")
         except Exception as e:
-            raise ValueError(f"Failed to decrypt vote: {str(e)}")
+            # Could be JSON errors or integrity errors surfaced differently
+            raise IntegrityError(f"Failed to decrypt or verify ciphertext: {e}")
 
     def _hash_voter_id(self, voter_id: str):
         digest = hashes.Hash(hashes.SHA256())
         digest.update((voter_id + "some_salt").encode())
         return base64.b64encode(digest.finalize()).decode()
+
+
+class DecryptionError(Exception):
+    """Base exception for decryption-related failures."""
+    pass
+
+
+class InvalidPackageError(DecryptionError):
+    """Raised when the encrypted package is malformed (bad base64/JSON)."""
+    pass
+
+
+class KeyDecryptionError(DecryptionError):
+    """Raised when the envelope key cannot be decrypted with the master key."""
+    pass
+
+
+class IntegrityError(DecryptionError):
+    """Raised when ciphertext/tag integrity/authentication fails (GCM tag mismatch)."""
+    pass

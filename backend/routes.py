@@ -3,7 +3,8 @@
 # Routes and views for Flask app combining all roles into a unified interface
 # Calls underlying security services from authentication, voting, audit, etc.
 
-from flask import render_template, request, jsonify, session, redirect, url_for, abort
+from flask import render_template, request, jsonify, session, redirect, url_for, abort, send_file
+import os
 from backend import app, limiter, db
 from backend.authentication.mfa import MFAService
 from backend.authentication.rbac import RBACService, require_permission, Permission, opa_check_permission
@@ -13,6 +14,7 @@ from backend.encryption.digital_signatures import DigitalSignatureService
 from backend.encryption.password_hashing import PasswordHashingService
 from backend.security.input_validator import InputValidator
 from backend.audit.audit_logger import AuditLogger
+import json
 from datetime import datetime
 from flask_jwt_extended import create_access_token, set_access_cookies, create_refresh_token, set_refresh_cookies, unset_jwt_cookies, jwt_required, get_jwt_identity
 
@@ -239,8 +241,46 @@ def view_audit_logs():
     role = session.get('user_role')
     if not opa_check_permission(role, Permission.VIEW_AUDIT_LOGS.value):
         abort(403)
-    # Placeholder: In production, load and display audit logs from file or DB
-    return render_template('view_audit_logs.html')
+    # Load and display audit logs from the audit logger file
+    entries = []
+    error = None
+    try:
+        # Use the direct path to logs/audit.log
+        log_path = 'logs/audit.log'
+        with open(log_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except Exception:
+                    # If a line isn't valid JSON, include raw line
+                    entries.append({'raw': line})
+        # show newest first
+        entries = list(reversed(entries))
+    except FileNotFoundError:
+        error = 'Audit log file not found.'
+    except Exception as e:
+        error = f'Error loading audit logs: {e}'
+
+    return render_template('view_audit_logs.html', entries=entries, error=error)
+
+
+@app.route('/download_audit_log')
+@jwt_required()
+@require_permission(Permission.VIEW_AUDIT_LOGS)
+def download_audit_log():
+    role = session.get('user_role')
+    if not opa_check_permission(role, Permission.VIEW_AUDIT_LOGS.value):
+        abort(403)
+    log_path = getattr(audit_logger, 'log_file', 'logs/audit.log')
+    try:
+        return send_file(log_path, as_attachment=True, download_name='audit.log')
+    except FileNotFoundError:
+        abort(404)
+    except Exception:
+        abort(500)
 
 @app.route('/configure_system')
 @jwt_required()

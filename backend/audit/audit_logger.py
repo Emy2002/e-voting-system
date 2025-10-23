@@ -71,9 +71,13 @@ class AuditLogger:
                     signature = base64.b64decode(log_entry['signature'])
                     entry_copy = dict(log_entry)
                     entry_copy.pop('signature')
+                    current_hash = entry_copy.pop('hash')
                     entry_json = json.dumps(entry_copy, sort_keys=True).encode()
                     public_key = self.signing_key.public_key()
                     public_key.verify(signature, entry_json)
+                    calculated_hash = hashlib.sha256(json.dumps(entry_copy, sort_keys=True).encode()).hexdigest()
+                    if calculated_hash != current_hash:
+                        return False
                     previous_hash = log_entry['hash']
             return True
         except Exception:

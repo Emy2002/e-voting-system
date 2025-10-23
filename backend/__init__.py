@@ -34,7 +34,7 @@ def expired_token_callback(jwt_header, jwt_payload):
     return jsonify({"msg": "Token has expired"}), 401
 
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
-    'DATABASE_URL', 'postgresql://evoting:password@db/evoting'
+    'DATABASE_URL', 'postgresql://evoting:password@localhost:5434/evoting'
 )
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
