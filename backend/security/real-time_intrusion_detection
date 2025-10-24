@@ -19,7 +19,8 @@ from typing import Dict, Any, Optional
 
 # Try to import the SIEM connector from the workspace; if unavailable, use a simple stub.
 try:
-    from siem_connector import SIEMConnector, SecurityEventType, SecurityEventLevel
+    # Adding '# type: ignore[import]' suppresses the Pylance warning
+    from siem_connector import SIEMConnector, SecurityEventType, SecurityEventLevel  # type: ignore[import]
 except Exception:
     # Fallback stub
     class SecurityEventLevel:
@@ -34,6 +35,8 @@ except Exception:
         AUTH_SUCCESS = "AUTH_SUCCESS"
         SUSPICIOUS_ACTIVITY = "SUSPICIOUS_ACTIVITY"
         THREAT_DETECTED = "THREAT_DETECTED"
+        # Adding a common type for the New IP logic to reference (DATA_ACCESS)
+        DATA_ACCESS = "DATA_ACCESS"
 
     class SIEMConnector:
         def __init__(self, *args, **kwargs):
@@ -64,6 +67,9 @@ class IntrusionDetector:
         self.failed_logins_per_ip: Dict[str, deque] = defaultdict(deque)
         self.failed_login_threshold = failed_login_threshold
         self.failed_login_window = timedelta(seconds=failed_login_window)
+        # Store window in seconds for message
+        self.failed_login_window_seconds = failed_login_window 
+
 
         # New IP for user detection: remember set of known IPs per user
         self.known_ips_per_user: Dict[str, set] = defaultdict(set)
@@ -72,6 +78,9 @@ class IntrusionDetector:
         self.data_transfers_per_user: Dict[str, deque] = defaultdict(deque)  # deque of (timestamp, bytes)
         self.data_exfil_bytes_threshold = data_exfil_bytes_threshold
         self.data_exfil_window = timedelta(seconds=data_exfil_window)
+        # Store window in seconds for message
+        self.data_exfil_window_seconds = data_exfil_window
+
 
         # Lock for thread-safety
         self.lock = threading.Lock()
@@ -119,18 +128,21 @@ class IntrusionDetector:
                 self._alert(
                     event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
                     level=SecurityEventLevel.HIGH,
-                    message=f"Brute-force login detection: {len(dq)} failures from IP {ip} in last {self.failed_login_window}.",
+                    # FIXED: use the seconds variable for a cleaner message
+                    message=f"Brute-force login detection: {len(dq)} failures from IP {ip} in last {self.failed_login_window_seconds} seconds.",
                     source_ip=ip,
                     user_id=evt.user_id,
-                    additional_data={"failures": len(dq), "window_seconds": int(self.failed_login_window.total_seconds())}
+                    additional_data={"failures": len(dq), "window_seconds": self.failed_login_window_seconds}
                 )
                 # Clear to avoid repeat alerts
                 dq.clear()
 
         # New IP for user detection
-        if evt.event_type in (SecurityEventType.AUTH_SUCCESS, SecurityEventType.DATA_ACCESS if hasattr(SecurityEventType, 'DATA_ACCESS') else None):
+        # Note: We assume 'SecurityEventType.DATA_ACCESS' exists, which is safe due to the stub's addition
+        if evt.event_type in (SecurityEventType.AUTH_SUCCESS, SecurityEventType.DATA_ACCESS):
             if evt.user_id:
                 known = self.known_ips_per_user[evt.user_id]
+                # Check if the IP is new AND the user has known IPs (to avoid alerting on the very first login)
                 if evt.source_ip and evt.source_ip not in known and known:
                     # New IP observed for a user who had known IPs -> suspicious
                     self._alert(
@@ -158,7 +170,7 @@ class IntrusionDetector:
                 self._alert(
                     event_type=SecurityEventType.THREAT_DETECTED,
                     level=SecurityEventLevel.CRITICAL,
-                    message=f"Potential data exfiltration: user={evt.user_id} transferred {total} bytes in last {self.data_exfil_window}.",
+                    message=f"Potential data exfiltration: user={evt.user_id} transferred {total} bytes in last {self.data_exfil_window_seconds} seconds. Threshold is {self.data_exfil_bytes_threshold} bytes.",
                     source_ip=evt.source_ip,
                     user_id=evt.user_id,
                     additional_data={"bytes": total}
@@ -200,12 +212,14 @@ class IntrusionDetector:
 
 # Example usage / test harness
 if __name__ == "__main__":
+    # The SIEMConnector stub will be used, printing alerts to the console.
     siem = SIEMConnector()
     detector = IntrusionDetector(siem)
 
     now = datetime.utcnow()
 
-    # Simulate repeated failed auths from same IP
+    print("\n--- 1. Brute-Force Detection Test ---")
+    # Simulate repeated failed auths from same IP (6 attempts in under 300s/5 min)
     ip = "10.0.0.5"
     for i in range(6):
         detector.feed_event({
@@ -215,33 +229,38 @@ if __name__ == "__main__":
             "source_ip": ip,
             "bytes_transferred": 0
         })
-        time.sleep(0.05)
+        time.sleep(0.01) # Small sleep for realism
 
-    # Simulate new IP for user
+    print("\n--- 2. New IP for User Detection Test ---")
+    # Simulate first login
     detector.feed_event({
         "timestamp": datetime.utcnow(),
         "event_type": SecurityEventType.AUTH_SUCCESS,
         "user_id": "alice",
         "source_ip": "192.0.2.1"
     })
+    # Simulate second login from a new IP, triggering an alert
     detector.feed_event({
         "timestamp": datetime.utcnow() + timedelta(seconds=5),
         "event_type": SecurityEventType.AUTH_SUCCESS,
         "user_id": "alice",
-        "source_ip": "198.51.100.2"
+        "source_ip": "198.51.100.2" # New IP
     })
 
-    # Simulate data exfil: multiple large transfers
+    print("\n--- 3. Data Exfiltration Detection Test ---")
+    # Simulate data exfil: 5 transfers of 3MB = 15MB total (Threshold is 10MB)
     for i in range(5):
         detector.feed_event({
             "timestamp": datetime.utcnow() + timedelta(seconds=i * 10),
-            "event_type": getattr(SecurityEventType, 'DATA_ACCESS', 'DATA_ACCESS'),
+            "event_type": SecurityEventType.DATA_ACCESS, # Using the added stub type
             "user_id": "exfil_user",
             "source_ip": "203.0.113.5",
             "bytes_transferred": 3 * 1024 * 1024  # 3 MB
         })
-        time.sleep(0.05)
+        time.sleep(0.01)
 
     # Allow background thread to process
+    print("\n--- Waiting for cleanup thread... ---")
     time.sleep(1)
     detector.stop()
+    print("Detector stopped. Test complete.")
