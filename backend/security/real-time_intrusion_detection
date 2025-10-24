@@ -1,0 +1,247 @@
+"""
+realtime_intrusion_detector.py
+
+Real-time intrusion detection and alerting module.
+- Detects brute-force login attempts
+- Detects new-IP-for-user (possible credential compromise)
+- Detects potential data exfiltration (high data transfer from a user)
+- Sends alerts to SIEM via SIEMConnector
+
+This is a lightweight, in-memory detector intended for demo/testing.
+For production, replace in-memory stores with persistent/streaming systems.
+"""
+from collections import defaultdict, deque
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+import threading
+import time
+from typing import Dict, Any, Optional
+
+# Try to import the SIEM connector from the workspace; if unavailable, use a simple stub.
+try:
+    from siem_connector import SIEMConnector, SecurityEventType, SecurityEventLevel
+except Exception:
+    # Fallback stub
+    class SecurityEventLevel:
+        INFO = "INFO"
+        LOW = "LOW"
+        MEDIUM = "MEDIUM"
+        HIGH = "HIGH"
+        CRITICAL = "CRITICAL"
+
+    class SecurityEventType:
+        AUTH_FAILURE = "AUTH_FAILURE"
+        AUTH_SUCCESS = "AUTH_SUCCESS"
+        SUSPICIOUS_ACTIVITY = "SUSPICIOUS_ACTIVITY"
+        THREAT_DETECTED = "THREAT_DETECTED"
+
+    class SIEMConnector:
+        def __init__(self, *args, **kwargs):
+            pass
+        def send_security_event(self, event_type, level, message, source_ip=None, user_id=None, additional_data=None):
+            print(f"[SIEM-STUB] {level} {event_type}: {message} (user={user_id}, ip={source_ip})")
+            return True
+
+@dataclass
+class Event:
+    timestamp: datetime
+    event_type: str
+    user_id: Optional[str]
+    source_ip: Optional[str]
+    bytes_transferred: Optional[int] = 0
+    details: Dict[str, Any] = None
+
+class IntrusionDetector:
+    """Lightweight real-time intrusion detector with SIEM alerting."""
+    def __init__(self, siem: SIEMConnector,
+                 failed_login_threshold: int = 5,
+                 failed_login_window: int = 300,
+                 data_exfil_bytes_threshold: int = 10 * 1024 * 1024,  # 10 MB
+                 data_exfil_window: int = 3600):  # 1 hour
+        self.siem = siem
+
+        # Brute-force detection: track failed auth timestamps per IP
+        self.failed_logins_per_ip: Dict[str, deque] = defaultdict(deque)
+        self.failed_login_threshold = failed_login_threshold
+        self.failed_login_window = timedelta(seconds=failed_login_window)
+
+        # New IP for user detection: remember set of known IPs per user
+        self.known_ips_per_user: Dict[str, set] = defaultdict(set)
+
+        # Data exfil detection: track bytes transferred per user in sliding window
+        self.data_transfers_per_user: Dict[str, deque] = defaultdict(deque)  # deque of (timestamp, bytes)
+        self.data_exfil_bytes_threshold = data_exfil_bytes_threshold
+        self.data_exfil_window = timedelta(seconds=data_exfil_window)
+
+        # Lock for thread-safety
+        self.lock = threading.Lock()
+
+        # Background cleanup
+        self.running = True
+        self.cleanup_thread = threading.Thread(target=self._cleanup_loop, daemon=True)
+        self.cleanup_thread.start()
+
+    def _cleanup_loop(self):
+        while self.running:
+            with self.lock:
+                self._expire_old_entries()
+            time.sleep(5)
+
+    def stop(self):
+        self.running = False
+        self.cleanup_thread.join(timeout=2)
+
+    def feed_event(self, raw_event: Dict[str, Any]):
+        """Feed an event into the detector. raw_event is a dict with keys matching Event."""
+        evt = Event(
+            timestamp=raw_event.get("timestamp", datetime.utcnow()),
+            event_type=raw_event.get("event_type"),
+            user_id=raw_event.get("user_id"),
+            source_ip=raw_event.get("source_ip"),
+            bytes_transferred=raw_event.get("bytes_transferred", 0),
+            details=raw_event.get("details", {})
+        )
+        with self.lock:
+            self._evaluate(evt)
+
+    def _evaluate(self, evt: Event):
+        # Brute-force login detection
+        if evt.event_type == SecurityEventType.AUTH_FAILURE:
+            ip = evt.source_ip or "unknown"
+            dq = self.failed_logins_per_ip[ip]
+            dq.append(evt.timestamp)
+            # Remove entries older than window
+            while dq and (evt.timestamp - dq[0]) > self.failed_login_window:
+                dq.popleft()
+
+            if len(dq) >= self.failed_login_threshold:
+                # Alert
+                self._alert(
+                    event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
+                    level=SecurityEventLevel.HIGH,
+                    message=f"Brute-force login detection: {len(dq)} failures from IP {ip} in last {self.failed_login_window}.",
+                    source_ip=ip,
+                    user_id=evt.user_id,
+                    additional_data={"failures": len(dq), "window_seconds": int(self.failed_login_window.total_seconds())}
+                )
+                # Clear to avoid repeat alerts
+                dq.clear()
+
+        # New IP for user detection
+        if evt.event_type in (SecurityEventType.AUTH_SUCCESS, SecurityEventType.DATA_ACCESS if hasattr(SecurityEventType, 'DATA_ACCESS') else None):
+            if evt.user_id:
+                known = self.known_ips_per_user[evt.user_id]
+                if evt.source_ip and evt.source_ip not in known and known:
+                    # New IP observed for a user who had known IPs -> suspicious
+                    self._alert(
+                        event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
+                        level=SecurityEventLevel.MEDIUM,
+                        message=f"New IP for user detected: user={evt.user_id}, ip={evt.source_ip}",
+                        source_ip=evt.source_ip,
+                        user_id=evt.user_id,
+                        additional_data={"known_ips": list(known)}
+                    )
+                if evt.source_ip:
+                    known.add(evt.source_ip)
+
+        # Data exfiltration detection
+        if evt.bytes_transferred and evt.user_id:
+            dq = self.data_transfers_per_user[evt.user_id]
+            dq.append((evt.timestamp, evt.bytes_transferred))
+            # Remove old entries
+            total = 0
+            cutoff = evt.timestamp - self.data_exfil_window
+            while dq and dq[0][0] < cutoff:
+                dq.popleft()
+            total = sum(b for _, b in dq)
+            if total >= self.data_exfil_bytes_threshold:
+                self._alert(
+                    event_type=SecurityEventType.THREAT_DETECTED,
+                    level=SecurityEventLevel.CRITICAL,
+                    message=f"Potential data exfiltration: user={evt.user_id} transferred {total} bytes in last {self.data_exfil_window}.",
+                    source_ip=evt.source_ip,
+                    user_id=evt.user_id,
+                    additional_data={"bytes": total}
+                )
+                dq.clear()
+
+    def _alert(self, event_type: str, level: str, message: str, source_ip: Optional[str] = None, user_id: Optional[str] = None, additional_data: Optional[Dict] = None):
+        # Send alert to SIEM
+        try:
+            self.siem.send_security_event(
+                event_type=event_type,
+                level=level,
+                message=message,
+                source_ip=source_ip,
+                user_id=user_id,
+                additional_data=additional_data or {}
+            )
+        except Exception as e:
+            # Ensure detector doesn't crash on SIEM errors
+            print(f"Failed to send alert to SIEM: {e}")
+
+    def _expire_old_entries(self):
+        # Expire old failed login entries
+        now = datetime.utcnow()
+        for ip, dq in list(self.failed_logins_per_ip.items()):
+            while dq and (now - dq[0]) > self.failed_login_window:
+                dq.popleft()
+            if not dq:
+                del self.failed_logins_per_ip[ip]
+
+        # Expire old data transfer entries
+        cutoff = now - self.data_exfil_window
+        for user, dq in list(self.data_transfers_per_user.items()):
+            while dq and dq[0][0] < cutoff:
+                dq.popleft()
+            if not dq:
+                del self.data_transfers_per_user[user]
+
+
+# Example usage / test harness
+if __name__ == "__main__":
+    siem = SIEMConnector()
+    detector = IntrusionDetector(siem)
+
+    now = datetime.utcnow()
+
+    # Simulate repeated failed auths from same IP
+    ip = "10.0.0.5"
+    for i in range(6):
+        detector.feed_event({
+            "timestamp": now + timedelta(seconds=i * 10),
+            "event_type": SecurityEventType.AUTH_FAILURE,
+            "user_id": "victim_user",
+            "source_ip": ip,
+            "bytes_transferred": 0
+        })
+        time.sleep(0.05)
+
+    # Simulate new IP for user
+    detector.feed_event({
+        "timestamp": datetime.utcnow(),
+        "event_type": SecurityEventType.AUTH_SUCCESS,
+        "user_id": "alice",
+        "source_ip": "192.0.2.1"
+    })
+    detector.feed_event({
+        "timestamp": datetime.utcnow() + timedelta(seconds=5),
+        "event_type": SecurityEventType.AUTH_SUCCESS,
+        "user_id": "alice",
+        "source_ip": "198.51.100.2"
+    })
+
+    # Simulate data exfil: multiple large transfers
+    for i in range(5):
+        detector.feed_event({
+            "timestamp": datetime.utcnow() + timedelta(seconds=i * 10),
+            "event_type": getattr(SecurityEventType, 'DATA_ACCESS', 'DATA_ACCESS'),
+            "user_id": "exfil_user",
+            "source_ip": "203.0.113.5",
+            "bytes_transferred": 3 * 1024 * 1024  # 3 MB
+        })
+        time.sleep(0.05)
+
+    # Allow background thread to process
+    time.sleep(1)
+    detector.stop()
